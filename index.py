@@ -20,18 +20,20 @@ class Consulting():
         self.options.add_argument("--headless")
 
     def start(self):
-        lista_cnpj = []
-        planilha = pd.read_excel(f"{self.base_path}{self.sep}testes{self.sep}teste_pre_dot.xlsx")
-        df = pd.DataFrame(planilha)
+        df = pd.read_excel(f"{self.base_path}{self.sep}testes{self.sep}teste_pre_dot.xlsx")
+        df = pd.DataFrame(df)
+        lista = []
+        for index, row in df.iterrows():
+            cnpj = row[0]
+            cnpj = cnpj.replace('.','').replace('-', '').replace('/', '')
+            lista.append(cnpj)
+        print(index)
+        print(len(lista))
         sleep(0.1)
-        
-        for index, valor in df:
-            print(index)
-            print(valor)
-            lista_cnpj.append(valor)
+
 
     def scraping(self):
-        url = self.driver.get('https://www.selenium.dev/documentation/webdriver/getting_started/first_script/')
+        url = self.driver.get('https://www.trf4.jus.br/')
         self.driver.maximize_window()
         sleep(5)
 

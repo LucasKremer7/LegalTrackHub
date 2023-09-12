@@ -27,12 +27,14 @@ class Consulting():
         self.options = webdriver.ChromeOptions()
         self.sep = self.sep = '/' if eval(os.getenv('IS_LINUX')) else '\\'
         # self.options.add_argument("--headless")
-        self.extract_capa_do_processo = {'cpf/cnpj':[],'N do processo': [],'Assunto principal': [],'Classe da acao': [],'Competencia': [],'Data de autuacao': [],
+        self.extract_capa_do_processo = {'CPF/CNPJ':[],'N do processo': [],'Assunto principal': [],'Classe da acao': [],'Competencia': [],'Data de autuacao': [],
                                         'Situacao': [],'Orgao julgador': [],'Juiz': [],'Processos relacionados': [], 'Nome do Advogado': [],'Advogado Reu': [],
                                         'Autor': [],'Reu': [],'Caminho_Planilha_Movimentos': [] }
+        self.lista_URLs = ['https://eproc.jfpr.jus.br/eprocV2/', 'https://eproc.jfsc.jus.br/eprocV2/', 'https://eproc.jfrs.jus.br/eprocV2/']
 
     def start(self):
         df = pd.read_excel(f"{self.base_path}{self.sep}testes{self.sep}teste_pre_dot.xlsx") # Primeiro CNPJ 6 processos
+        # df = pd.read_excel(f'{self.base_path}{self.sep}testes{self.sep}testes_santa_catarina - Copia.xlsx')
         # df = pd.read_excel(f"{self.base_path}{self.sep}testes{self.sep}teste_pre_dot - Copia.xlsx") # Primeiro CNPJ nenhum processo
         # df = pd.read_excel(f"{self.base_path}{self.sep}testes{self.sep}teste_pre_dot - Copia (2).xlsx") # Primeiro CNPJ somente 1 processo
         df = pd.DataFrame(df)
@@ -46,11 +48,11 @@ class Consulting():
     def init_driver(self):
         self.driver = webdriver.Chrome(options=self.options)
         self.driver.maximize_window()
-        self.acess_tribunal(self.usuario, self.senha)
+        self.acess_tribunal(self.usuario, self.senha, self.lista_URLs)
 
-    def acess_tribunal(self, usuario, senha):
-        url = 'https://eproc.jfpr.jus.br/eprocV2/'
-        self.driver.get(url)
+    def acess_tribunal(self, usuario, senha, URLs):
+
+        self.driver.get(URLs[0])
         sleep(2)
         self.driver.find_element(By.ID, 'txtUsuario').send_keys(usuario)
         self.driver.find_element(By.ID, 'pwdSenha').send_keys(senha)
@@ -104,8 +106,8 @@ class Consulting():
     def result_pesquisa(self): # Função que verifica o resultado inicial da consulta, se o CNPJ possui ou não processo.
 
         url_page = self.driver.page_source
-        site = BeautifulSoup(url_page, 'html.parser') 
-        process_exists = site.find('div', attrs={'id':'divAreaResultadosAjax'}) # --- # Esse elemento aparece nas condições de 'Não tem processo' e 'Tem vários processos'
+        self.site = BeautifulSoup(url_page, 'html.parser') 
+        process_exists = self.site.find('div', attrs={'id':'divAreaResultadosAjax'}) # --- # Esse elemento aparece nas condições de 'Não tem processo' e 'Tem vários processos'
 
         if process_exists == None:
             print(f' [ O CNPJ "{self.cnpj}" possui apenas 1 processo.\nChamando a função que faz a coleta dos dados processuais. ] ')
@@ -121,7 +123,7 @@ class Consulting():
     def zero_process(self): # Função que adicionará no dicionário a informação de que este CNPJ não possui processo no TRF4
         print('\n\n\nEstou na função zero_process\n\n\n')
 
-        self.extract_capa_do_processo['cpf/cnpj'].append(self.cnpj)
+        self.extract_capa_do_processo['CPF/CNPJ'].append(self.cnpj)
         self.extract_capa_do_processo['N do processo'].append('Não possui processo')
         self.extract_capa_do_processo['Assunto principal'].append('Não possui processo')
         self.extract_capa_do_processo['Classe da acao'].append('Não possui processo')
@@ -141,15 +143,18 @@ class Consulting():
 
     def one_process(self): # Função que adicionará no dicionário a informação de que este CNPJ possui apenas um processo no TRF4
         print('\n\n\nEstou na função one_process\n\n\n')
-        url_page = self.driver.page_source
-        site = BeautifulSoup(url_page, 'html.parser')
-        print(site.prettify())
-        self.processo = site.find('div', attrs={'style': 'XXX'}) 
+        # url_page = self.driver.page_source
+        # site = BeautifulSoup(url_page, 'html.parser')
+        # # print(site.prettify())
+        self.processo = self.site.find('span', attrs={'id': 'txtNumProcesso'}).text
+        self.processo = self.processo.replace('.', '').replace('-', '') 
         sleep(1)
         self.extract_capa_process(self.processo, self.cnpj)
+        self.driver.find_element(By.ID, 'btnNova').click()
+        sleep(2)
     
     def many_process(self): # Função que adicionará no dicionário a informação de que este CNPJ possui varios processos no TRF4
-        print('\n\n\nEstou na função many_process\n\n\n')
+        print('\n\n\n [ Estou na função many_process ] \n\n\n')
         # sleep(4)
         lista_processos = []
         tabela_processos = self.driver.find_element(By.CSS_SELECTOR, 'div > table > tbody').find_elements(By.TAG_NAME, 'tr') # Retorna uma lista com todos os elementos 'td' dentro da tag 'tr'
@@ -167,39 +172,32 @@ class Consulting():
             self.processo = self.processo.replace('.', '').replace('-', '')
             print(self.processo)
             sleep(4)
-            self.driver.find_element(By.CSS_SELECTOR, 'div > form > input').send_keys(self.processo, Keys.ENTER)
+            self.driver.find_element(By.ID, 'txtNumProcessoPesquisaRapida').click()
+            sleep(1)
+            self.driver.find_element(By.ID, 'txtNumProcessoPesquisaRapida').send_keys(self.processo, Keys.ENTER)
             self.extract_capa_process(self.processo, self.cnpj)
+        
+        self.driver.find_element(By.ID, 'btnNova').click()
+        sleep(2)
 
     def extract_capa_process(self, processo, cnpj):
-        print(f" [ Estou na função de extrair informações da Capa do Processo! ] ")
+        print(f"\n\n\n [ Estou na função de extrair informações da Capa do Processo! ] \n\n\n")
         sleep(4)
 
         url_page = self.driver.page_source
-        site = BeautifulSoup(url_page, 'html.parser')
+        self.site = BeautifulSoup(url_page, 'html.parser')
         
-        # btn_assunto = self.driver.find_element(By.ID, 'conteudoAssuntos2')
         self.driver.execute_script("arguments[0].style.display = 'block';", self.driver.find_element(By.ID, 'conteudoAssuntos2'))
         assunto_principal = self.driver.find_element(By.CSS_SELECTOR, '#conteudoAssuntos2 > table > tbody > tr.infraTrClara > td:nth-child(2)')
-        classe_acao = self.driver.find_element(By.ID, 'txtClasse') # --------------------------------------------------------------------------------- # Localiza o elemento da Classe da acao
-        competencia = self.driver.find_element(By.ID, 'txtCompetencia') # ---------------------------------------------------------------------------- # Localiza o elemento da Competencia
-        data_autuacao = self.driver.find_element(By.ID, 'txtAutuacao') # ----------------------------------------------------------------------------- # Localiza o elemento da Data de autuacao do processo
-        situacao = self.driver.find_element(By.ID, 'txtSituacao') # ---------------------------------------------------------------------------------- # Localiza o elemento da Situacao do processo
-        orgao_julgador = self.driver.find_element(By.ID, 'txtOrgaoJulgador') # ----------------------------------------------------------------------- # Localiza o elemento que informa qual é o Orgao julgador
-        juiz = self.driver.find_element(By.ID, 'txtMagistrado') # ------------------------------------------------------------------------------------ # Localiza o elemento que informa o nome do Juiz responsável
-        partes_representantes = self.driver.find_element(By.CSS_SELECTOR,'#tblPartesERepresentantes > tbody > tr:nth-child(2)').text
-        partes_representantes = partes_representantes.split('\n')
-
-        nome_autor = partes_representantes[0].strip()
-        print(nome_autor)
-        nome_advogado = partes_representantes[2].strip()
-        print(nome_advogado)
-        nome_reu = partes_representantes[5].strip()
-        print(nome_reu)
-        reu_advogado = partes_representantes[7].strip()
-        print(reu_advogado)
-        
-
-        self.extract_capa_do_processo['cpf/cnpj'].append(cnpj)
+        classe_acao = self.driver.find_element(By.ID, 'txtClasse')
+        competencia = self.driver.find_element(By.ID, 'txtCompetencia')
+        data_autuacao = self.driver.find_element(By.ID, 'txtAutuacao')
+        situacao = self.driver.find_element(By.ID, 'txtSituacao')
+        orgao_julgador = self.driver.find_element(By.ID, 'txtOrgaoJulgador')
+        juiz = self.driver.find_element(By.ID, 'txtMagistrado')   
+        partes = self.extract_partes_representantes(self.site) # Função que coleta o nome das partes e seus respectivos advogados.
+        processos_relacionados = self.find_process_related(self.site)
+        self.extract_capa_do_processo['CPF/CNPJ'].append(cnpj)
         self.extract_capa_do_processo['N do processo'].append(processo)
         self.extract_capa_do_processo['Assunto principal'].append(assunto_principal.text)
         self.extract_capa_do_processo['Classe da acao'].append(classe_acao.text)
@@ -208,24 +206,99 @@ class Consulting():
         self.extract_capa_do_processo['Situacao'].append(situacao.text)
         self.extract_capa_do_processo['Orgao julgador'].append(orgao_julgador.text)
         self.extract_capa_do_processo['Juiz'].append(juiz.text)
-        self.extract_capa_do_processo['Nome do Advogado'].append(nome_advogado)
-        self.extract_capa_do_processo['Advogado Reu'].append(reu_advogado)
-        self.extract_capa_do_processo['Autor'].append(nome_autor)
-        self.extract_capa_do_processo['Reu'].append(nome_reu)
-        self.extract_capa_do_processo['Caminho_Planilha_Movimentos'].append(f"{self.base_path}a00_downloads{self.sep}{self.cnpj}{self.sep}_{self.proc}_inicial_.pdf")
+        self.extract_capa_do_processo['Processos relacionados'].append(processos_relacionados)
+        self.extract_capa_do_processo['Autor'].append(partes[0])
+        self.extract_capa_do_processo['Nome do Advogado'].append(partes[1])
+        self.extract_capa_do_processo['Reu'].append(partes[2])
+        self.extract_capa_do_processo['Advogado Reu'].append(partes[3])
+        # self.extract_capa_do_processo['Caminho_Planilha_Movimentos'].append(f"{self.base_path}a00_downloads{self.sep}{self.cnpj}{self.sep}_{processo}_inicial_.pdf")
 
+        self.verify_second_captcha()
         self.save_planilha(self.extract_capa_do_processo)
+        
+
+    def verify_second_captcha(self):
+        print(' [ Estou no segundo Captcha! ]')
+        
+        # CHAMA A FUNÇÃO QUE QUEBRA CAPTCHAS
+        # Caso ele consiga quebrar o captcha e o link ficar apto para ser clicado, chame a função de screenshot
+        caminho_do_arquivo = self._screenshot(self.site)
+        self.extract_capa_do_processo['Caminho_Planilha_Movimentos'].append(caminho_do_arquivo)
+        
+        # Caso contrário ele 
     
-    def find_process_related(self):
-        print(' [ Estou na função de processos relacionados! ]')
-        processo_relacionado = self.driver.find_element(By.CSS_SELECTOR, '#tableRelacionado > tbody').find_elements(By.TAG_NAME, 'a')
-        for elem in processo_relacionado:
+    def extract_partes_representantes(self, site):
+
+        """
+        Está função irá realizar o tratamento e a coletado dos dados referente as partes do processo.
+        Bem como o autor(es), o(s) advogado(s) do autor, reu(s) e o(s) advogado(s).
+
+        """
+        
+        partes = []
+        lista = []
+
+        partes_representantes = site.find('table', attrs={'id': 'tblPartesERepresentantes'}).findAll('td') # Localiza a div com o autor e seu advogado, reu e seu advogado
+        ponteiro = 0
+        for elem in partes_representantes:
+            elem = elem.text
+            lista_autor = elem.split('\n')
+            for item in lista_autor:
+                lista_autor = item.split(10*'\xa0')
+                for objeto in lista_autor:
+                    objeto = objeto.replace('\xa0', '&')
+                    objeto = objeto.replace('&&&', ' ').replace('&&&&', ' ')
+                    objeto = objeto.replace('&', '')
+                    if len(lista_autor) == 1:
+                        partes.append(objeto)
+                        partes.append('Não localizado advogado!')
+                    elif len(lista_autor) == 2:
+                        partes.append(objeto)
+                    elif len(lista_autor) >= 3:
+                        lista.append(objeto)
+                        ponteiro += 1
+                        if ponteiro >= 3:
+                            partes.append(lista[0])
+                            partes.append(lista[1])
+
+        return partes
+    
+    def find_process_related(self, site):
+        print('\n\n\n [ Estou na função de processos relacionados! ] \n\n\n')
+
+        processos_relacionados = []
+
+        try:
+            loc_process = site.find('table', attrs={'id': 'tableRelacionado'}).findAll('a')        
+        except:
+            loc_process = False
+        
+        if loc_process:
+            for elem in loc_process:
+                processos_relacionados.append(elem.text)
+        else:
+            processos_relacionados.append('Não possui processos relacionados!')
+        
+        if len(processos_relacionados) > 1:
+            processos_relacionados = ','.join(processos_relacionados)
+            return processos_relacionados
+        else:
+            return processos_relacionados[0]
+    
+    def _screenshot(self, site):
+        # Fazer uma condicional que verifica a UF para quebrar o captcha
+        table_moviments = site.find('div', attrs={'id': 'divTblEventos'})
+        table_moviments = table_moviments.findAll('a')
+        for elem in table_moviments:
             print(elem.text)
+            if 'INIC1' in elem.text:
+                elem = elem.text
+                elem.click()
     
     def save_planilha(self, dados_processuais):
-        print(f' [ Estou na função de salvar na planilha as informações extraídas da capa do processo. ] ')
+        print(f'\n\n\n [ Estou na função de salvar na planilha as informações extraídas da capa do processo. ] \n\n\n')
 
-        dados = pd.DataFrame(dados_processuais, columns=['cpf/cnpj', 'N do processo', 'Assunto principal', 'Classe da acao', 'Competencia', 'Data de autuacao', 'Subsecao de origem', 'Situacao', 'Orgao julgador', 'Juiz', 'Processos relacionados', 'Nome do Advogado', 'OAB do Advogado', 'Autor', 'Reu', 'Caminho_Planilha_Movimentos'])
+        dados = pd.DataFrame(dados_processuais, columns=['CPF/CNPJ', 'N do processo', 'Assunto principal', 'Classe da acao', 'Competencia', 'Data de autuacao', 'Situacao', 'Orgao julgador', 'Juiz', 'Processos relacionados', 'Autor', 'Nome do Advogado', 'Reu', 'Advogado Reu', 'Caminho_Planilha_Movimentos'])
 
         dados.to_excel(f'{self.base_path}{self.sep}arquivos{self.sep}_Planilha_com_Resultados_.xlsx', index=False)
 

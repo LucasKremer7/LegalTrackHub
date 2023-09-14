@@ -14,6 +14,11 @@ import pandas as pd
 import openpyxl
 from bs4 import BeautifulSoup
 import requests
+from PIL import Image
+from glob import glob
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import utils
+from reportlab.pdfgen import canvas
 
 load_dotenv()
 
@@ -24,12 +29,12 @@ class Consulting():
         self.usuario = os.getenv('USUARIO')
         self.senha = os.getenv('SENHA')
         self.base_path = os.getenv('BASE_PATH')
-        self.options = webdriver.ChromeOptions()
+        self.options = webdriver.FirefoxOptions()
         self.sep = self.sep = '/' if eval(os.getenv('IS_LINUX')) else '\\'
         # self.options.add_argument("--headless")
         self.extract_capa_do_processo = {'CPF/CNPJ':[],'N do processo': [],'Assunto principal': [],'Classe da acao': [],'Competencia': [],'Data de autuacao': [],
                                         'Situacao': [],'Orgao julgador': [],'Juiz': [],'Processos relacionados': [], 'Nome do Advogado': [],'Advogado Reu': [],
-                                        'Autor': [],'Reu': [],'Caminho_Planilha_Movimentos': [] }
+                                        'Autor': [],'Reu': [],'Caminho': [] }
         self.lista_URLs = ['https://eproc.jfpr.jus.br/eprocV2/', 'https://eproc.jfsc.jus.br/eprocV2/', 'https://eproc.jfrs.jus.br/eprocV2/']
 
     def start(self):
@@ -46,8 +51,9 @@ class Consulting():
         self.init_driver()
 
     def init_driver(self):
-        self.driver = webdriver.Chrome(options=self.options)
+        self.driver = webdriver.Firefox(options=self.options)
         self.driver.maximize_window()
+        self.wait = WebDriverWait(self.driver, 10, poll_frequency=1)
         self.acess_tribunal(self.usuario, self.senha, self.lista_URLs)
 
     def acess_tribunal(self, usuario, senha, URLs):
@@ -137,7 +143,7 @@ class Consulting():
         self.extract_capa_do_processo['Autor'].append('Não possui processo')
         self.extract_capa_do_processo['Reu'].append('Não possui processo')
         self.extract_capa_do_processo['Processos relacionados'].append('Não possui processo')
-        self.extract_capa_do_processo['Caminho_Planilha_Movimentos'].append('Não possui processo')
+        self.extract_capa_do_processo['Caminho'].append('Não possui processo')
 
         self.save_planilha(self.extract_capa_do_processo)
 
@@ -211,10 +217,10 @@ class Consulting():
         self.extract_capa_do_processo['Nome do Advogado'].append(partes[1])
         self.extract_capa_do_processo['Reu'].append(partes[2])
         self.extract_capa_do_processo['Advogado Reu'].append(partes[3])
-        # self.extract_capa_do_processo['Caminho_Planilha_Movimentos'].append(f"{self.base_path}a00_downloads{self.sep}{self.cnpj}{self.sep}_{processo}_inicial_.pdf")
+        # self.extract_capa_do_processo['Caminho'].append(f"{self.base_path}a00_downloads{self.sep}{self.cnpj}{self.sep}_{processo}_inicial_.pdf")
 
         self.verify_second_captcha()
-        self.save_planilha(self.extract_capa_do_processo)
+        self.save_planilha(self.extract_capa_do_processo) # FIM DA COLETA DE DADOS DO PROCESSO. DADOS SENDO SALVO NA PLANILHA.
         
 
     def verify_second_captcha(self):
@@ -222,8 +228,10 @@ class Consulting():
         
         # CHAMA A FUNÇÃO QUE QUEBRA CAPTCHAS
         # Caso ele consiga quebrar o captcha e o link ficar apto para ser clicado, chame a função de screenshot
-        caminho_do_arquivo = self._screenshot(self.site)
-        self.extract_capa_do_processo['Caminho_Planilha_Movimentos'].append(caminho_do_arquivo)
+        self._screenshot(self.driver, self.wait)
+        caminho_do_arquivo = self.merge_pdf()
+        self.extract_capa_do_processo['Caminho'].append(caminho_do_arquivo)
+        print(caminho_do_arquivo)
         
         # Caso contrário ele 
     
@@ -285,20 +293,93 @@ class Consulting():
         else:
             return processos_relacionados[0]
     
-    def _screenshot(self, site):
+    def _screenshot(self, driver, wait):
         # Fazer uma condicional que verifica a UF para quebrar o captcha
-        table_moviments = site.find('div', attrs={'id': 'divTblEventos'})
-        table_moviments = table_moviments.findAll('a')
-        for elem in table_moviments:
-            print(elem.text)
-            if 'INIC1' in elem.text:
-                elem = elem.text
-                elem.click()
+        table_moviments = driver.find_element(By.XPATH, '//*[@id="divTblEventos"]').find_elements(By.TAG_NAME, 'tr')
+        for i in table_moviments:
+            elementos = i.find_elements(By.TAG_NAME, 'td')
+            if len(elementos) != 0 and 'INIC1' in elementos[4].text:
+                evento = int(elementos[0].text)
+                inicial = elementos[4]
+        
+        if evento == 1:
+            inicial = inicial.find_elements(By.TAG_NAME, 'a')
+            inicial = inicial[0]
+            inicial.click()
+        else:
+            ...
+            # Chamar aqui uma função de escape
+        
+        self.abas = self.driver.window_handles
+        sleep(0.5)
+        if len(self.abas) > 1:
+            self.original_window = self.driver.current_window_handle
+            for window_handle in self.driver.window_handles:
+                if window_handle != self.original_window:
+                    self.driver.switch_to.window(self.abas[-1])
+                    wait.until(frame_to_be_available_and_switch_to_it(('id', 'conteudoIframe')))
+                    print(window_handle)
+                    break
+        
+        self.driver.find_element(By.ID, 'scaleSelect').click()
+        sleep(0.5)
+        self.driver.find_element(By.ID, 'pageFitOption').click()
+        sleep(0.5)
+        container_pdfs = self.driver.find_element(By.ID,'viewer')
+        sleep(0.5)
+        pdfs_inic = container_pdfs.find_elements(By.CLASS_NAME, 'page')
+        sleep(0.5)
+        contador = 1
+        for pdf in pdfs_inic:
+            sleep(0.5)
+            contador_str = str(contador).zfill(2)
+            # pdf.screenshot(f'{self.base_path}{self.sep}arquivos{self.sep}_{self.processo}_page_{contador_str}_INIC1.png')
+            pdf.screenshot(f'{self.base_path}{self.sep}a07_temps{self.sep}a02_temp_files{self.sep}_{self.processo}_page_{contador_str}_INIC1.png')
+            sleep(0.5)
+            contador += 1
+
+        self.driver.close()
+        sleep(0.5)
+        self.driver.switch_to.window(self.original_window)
+        sleep(0.5)
+        self.driver.switch_to.default_content()
+        sleep(0.5)
+    
+    def merge_pdf(self):
+
+        try:
+            input_folder = f"{self.base_path}{self.sep}a07_temps{self.sep}a02_temp_files"
+            
+            output_pdf = f"{self.base_path}{self.sep}arquivos{self.sep}_{self.processo}_inicial_.pdf"
+            # output_pdf = f"{self.base_path}{self.sep}a00_downloads{self.sep}{self.cnpj}{self.sep}_{self.processo}_inicial_.pdf"
+
+            png_files = [file for file in os.listdir(input_folder) if file.endswith(".png")]
+            png_files.sort()
+            c = canvas.Canvas(output_pdf, pagesize=letter)
+            for png_file in png_files:
+                
+                img = Image.open(f"{self.base_path}{self.sep}a07_temps{self.sep}a02_temp_files{self.sep}{png_file}")
+                img_width, img_height = img.size            
+                c.drawImage(os.path.join(input_folder, png_file), 0, 0, width=img_width, height=img_height)            
+                if png_file != png_files[-1]:
+                    c.showPage()
+
+            c.save()
+            img.close()
+
+            for elem in glob(f"{self.base_path}{self.sep}a07_temps{self.sep}a02_temp_files{self.sep}*.png"):
+                os.remove(elem)
+            sleep(1)
+            caminho_do_arquivo = (f'{self.base_path}a00_downloads{self.sep}{self.cnpj}{self.sep}_{self.processo}_inicial_.pdf')
+        except:
+            caminho_do_arquivo = (f'Falha no download do processo {self.processo}. Necessário verificar manualmente.')
+
+        return caminho_do_arquivo
     
     def save_planilha(self, dados_processuais):
         print(f'\n\n\n [ Estou na função de salvar na planilha as informações extraídas da capa do processo. ] \n\n\n')
 
-        dados = pd.DataFrame(dados_processuais, columns=['CPF/CNPJ', 'N do processo', 'Assunto principal', 'Classe da acao', 'Competencia', 'Data de autuacao', 'Situacao', 'Orgao julgador', 'Juiz', 'Processos relacionados', 'Autor', 'Nome do Advogado', 'Reu', 'Advogado Reu', 'Caminho_Planilha_Movimentos'])
+        dados = pd.DataFrame(dados_processuais, columns=['CPF/CNPJ', 'N do processo', 'Assunto principal', 'Classe da acao', 'Competencia', 'Data de autuacao', 'Situacao', 'Orgao julgador', 'Juiz', 'Processos relacionados', 'Autor', 'Nome do Advogado', 'Reu', 'Advogado Reu', 'Caminho'])
 
         dados.to_excel(f'{self.base_path}{self.sep}arquivos{self.sep}_Planilha_com_Resultados_.xlsx', index=False)
 
